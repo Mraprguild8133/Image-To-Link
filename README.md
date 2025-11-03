@@ -18,4 +18,4 @@ A complete Python Flask application that converts uploaded images into shareable
 ```bash
 git clone https://github.com/Mraprguild8133/Image-To-Link.git
 cd Image-To-Link
-python app.py
+python bot.py
