@@ -3,8 +3,10 @@ import requests
 from io import BytesIO
 from telegram import Update, constants
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import threading
+import time
+import os
 
 # Import configuration
 from config import config
@@ -19,19 +21,67 @@ logger = logging.getLogger(__name__)
 # Flask App
 flask_app = Flask(__name__, template_folder="templates")
 
-@flask_app.route("/")
+# Add startup time for health checks
+STARTUP_TIME = time.time()
+
+@flask_app.before_request
+def before_request():
+    """Log all requests for debugging."""
+    logger.debug(f"Flask request: {request.method} {request.path}")
+
+@flask_app.route("/", methods=['GET', 'HEAD', 'OPTIONS'])
 def index():
+    """Handle multiple request methods for the root route."""
+    if request.method == 'HEAD':
+        return '', 200
+    elif request.method == 'OPTIONS':
+        return '', 200
     return render_template("index.html")
 
-@flask_app.route("/health")
+@flask_app.route("/health", methods=['GET', 'HEAD'])
 def health():
-    return jsonify({"status": "ok"})
+    """Comprehensive health check endpoint."""
+    if request.method == 'HEAD':
+        return '', 200
+    
+    health_data = {
+        "status": "ok",
+        "service": "telegram-image-bot",
+        "timestamp": time.time(),
+        "uptime": round(time.time() - STARTUP_TIME, 2),
+        "version": "1.0.0"
+    }
+    return jsonify(health_data)
+
+@flask_app.route("/info")
+def info():
+    """Service information endpoint."""
+    return jsonify({
+        "name": "Telegram Image Uploader Bot",
+        "description": "Upload images to ImgBB via Telegram",
+        "version": "1.0.0",
+        "max_file_size_mb": config.MAX_SIZE_MB
+    })
+
+@flask_app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@flask_app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({"error": "Method not allowed"}), 405
+
+@flask_app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Flask internal error: {error}")
+    return jsonify({"error": "Internal server error"}), 500
 
 def run_flask():
     """Run Flask app in a separate thread"""
-    flask_app.run(host="0.0.0.0", port=8000, debug=False)
+    logger.info(f"Starting Flask server on {config.FLASK_HOST}:{config.FLASK_PORT}")
+    flask_app.run(host=config.FLASK_HOST, port=config.FLASK_PORT, debug=False)
 
-# --- HANDLERS ---
+# --- TELEGRAM BOT HANDLERS ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message and instructions on /start."""
@@ -85,7 +135,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    await message.reply_text(f"Uploading file ({file.file_size / (1024 * 1024):.2f}MB)... Please wait.")
+    await message.reply_text(f"📤 Uploading file ({file.file_size / (1024 * 1024):.2f}MB)... Please wait.")
 
     # 4. Download the file contents into memory
     file_bytes = BytesIO()
@@ -128,8 +178,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 success_message,
                 parse_mode=constants.ParseMode.MARKDOWN
             )
+            logger.info(f"Successfully uploaded image for user {message.from_user.id}")
         else:
-            error_message = data.get('error', 'Unknown upload error.')
+            error_message = data.get('error', {}).get('message', 'Unknown upload error.')
             logger.error(f"ImgBB API error: {error_message}")
             await message.reply_text(f"❌ ImgBB Upload Failed: {error_message}")
 
@@ -149,6 +200,10 @@ async def fallback_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "I only handle image uploads. Please send me a *photo* to upload."
     )
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors in the telegram bot."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+
 # --- MAIN FUNCTION ---
 
 def main() -> None:
@@ -157,7 +212,7 @@ def main() -> None:
     # Start Flask in a separate thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    logger.info("Flask server started on http://0.0.0.0:8000")
+    logger.info(f"Flask server started on http://{config.FLASK_HOST}:{config.FLASK_PORT}")
     
     # Create the Application and pass your bot's token.
     application = Application.builder().token(config.BOT_TOKEN).build()
@@ -167,9 +222,12 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
+    
+    # Register error handler
+    application.add_error_handler(error_handler)
 
     # Start the Bot
-    logger.info("Starting polling...")
+    logger.info("Starting Telegram bot polling...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
