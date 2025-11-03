@@ -24,7 +24,7 @@
 
 ### Prerequisites
 
-* Python 3.8+ or Node.js 16+
+* Python 3.8+ 
 * Git
 
 ### Setup Steps
@@ -33,3 +33,4 @@
    ```bash
    git clone https://github.com/Mraprguild8133/Image-To-Link.git
    cd Image-To-Link
+   python3 bot.py
