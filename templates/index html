@@ -80,10 +80,6 @@
             gap: 0.5rem;
         }
 
-        .card h2 i {
-            font-size: 1.5rem;
-        }
-
         .features-list {
             list-style: none;
         }
@@ -98,11 +94,6 @@
 
         .features-list li:last-child {
             border-bottom: none;
-        }
-
-        .features-list li i {
-            color: #667eea;
-            font-size: 1.1rem;
         }
 
         .steps-list {
@@ -227,13 +218,13 @@
         .endpoint.get { border-left-color: #28a745; }
         .endpoint.get .endpoint-method { background: #28a745; }
 
-        .endpoint.path {
+        .endpoint-path {
             font-family: 'Courier New', monospace;
             font-weight: bold;
             margin: 0.5rem 0;
         }
 
-        .endpoint.description {
+        .endpoint-description {
             color: #666;
             font-size: 0.9rem;
         }
@@ -250,19 +241,23 @@
             opacity: 0.8;
         }
 
-        /* Icons using Unicode */
-        .icon::before {
-            font-style: normal;
+        .service-status {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: #28a745;
+            color: white;
+            border-radius: 25px;
+            font-weight: bold;
+            margin-top: 1rem;
         }
 
-        .icon-upload::before { content: "📤"; }
-        .icon-shield::before { content: "🛡️"; }
-        .icon-link::before { content: "🔗"; }
-        .icon-bot::before { content: "🤖"; }
-        .icon-image::before { content: "🖼️"; }
-        .icon-check::before { content: "✅"; }
-        .icon-telegram::before { content: "📱"; }
-        .icon-api::before { content: "⚡"; }
+        .status-online {
+            background: #28a745;
+        }
+
+        .status-offline {
+            background: #dc3545;
+        }
     </style>
 </head>
 <body>
@@ -271,6 +266,9 @@
         <header class="header">
             <h1>🤖 Image Uploader Bot</h1>
             <p>Upload images to ImgBB directly through Telegram. Fast, secure, and free!</p>
+            <div class="service-status status-online" id="serviceStatus">
+                ● Service Online
+            </div>
         </header>
 
         <!-- Stats Section -->
@@ -280,12 +278,12 @@
                 <span class="stat-label">Uptime (seconds)</span>
             </div>
             <div class="stat-card">
-                <span class="stat-number">{{ config.MAX_SIZE_MB }}</span>
+                <span class="stat-number">{% if config %}{{ config.MAX_SIZE_MB }}{% else %}5{% endif %}</span>
                 <span class="stat-label">Max File Size (MB)</span>
             </div>
             <div class="stat-card">
-                <span class="stat-number">Instant</span>
-                <span class="stat-label">Upload Speed</span>
+                <span class="stat-number" id="uploadCount">0</span>
+                <span class="stat-label">Uploads Processed</span>
             </div>
             <div class="stat-card">
                 <span class="stat-number">24/7</span>
@@ -297,34 +295,32 @@
         <section class="main-content">
             <!-- Features Card -->
             <div class="card">
-                <h2><span class="icon icon-bot"></span> Bot Features</h2>
+                <h2>🤖 Bot Features</h2>
                 <ul class="features-list">
                     <li>
-                        <span class="icon icon-upload"></span>
                         <strong>Easy Uploads:</strong> Just send photos directly to the bot
                     </li>
                     <li>
-                        <span class="icon icon-shield"></span>
                         <strong>Secure:</strong> Your images are uploaded directly to ImgBB
                     </li>
                     <li>
-                        <span class="icon icon-link"></span>
                         <strong>Direct Links:</strong> Get instant ImgBB URLs for sharing
                     </li>
                     <li>
-                        <span class="icon icon-check"></span>
                         <strong>File Management:</strong> Delete links provided for each upload
                     </li>
                     <li>
-                        <span class="icon icon-image"></span>
                         <strong>Quality Preserved:</strong> Original image quality maintained
+                    </li>
+                    <li>
+                        <strong>Rate Limited:</strong> 10 uploads per minute per user
                     </li>
                 </ul>
             </div>
 
             <!-- How to Use Card -->
             <div class="card">
-                <h2><span class="icon icon-telegram"></span> How to Use</h2>
+                <h2>📱 How to Use</h2>
                 <ol class="steps-list">
                     <li>Start a chat with our Telegram bot</li>
                     <li>Send any image as a photo (not document)</li>
@@ -333,25 +329,27 @@
                     <li>Share the link or use the delete link to remove</li>
                 </ol>
                 <a href="https://t.me/your_bot_username" class="telegram-button" target="_blank">
-                    <span class="icon icon-telegram"></span>
-                    Start Using Bot
+                    📱 Start Using Bot
                 </a>
+                <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
+                    Replace "your_bot_username" with your actual bot username
+                </p>
             </div>
         </section>
 
         <!-- API Section -->
         <section class="api-section">
-            <h2><span class="icon icon-api"></span> API Endpoints</h2>
+            <h2>⚡ API Endpoints</h2>
             <div class="endpoints">
                 <div class="endpoint get">
                     <span class="endpoint-method">GET</span>
                     <div class="endpoint-path">/health</div>
-                    <div class="endpoint-description">Health check and service status</div>
+                    <div class="endpoint-description">Health check and service status with uptime and statistics</div>
                 </div>
                 <div class="endpoint get">
                     <span class="endpoint-method">GET</span>
                     <div class="endpoint-path">/info</div>
-                    <div class="endpoint-description">Service information and configuration</div>
+                    <div class="endpoint-description">Service information and configuration details</div>
                 </div>
                 <div class="endpoint get">
                     <span class="endpoint-method">GET</span>
@@ -361,30 +359,81 @@
             </div>
         </section>
 
+        <!-- Technical Info -->
+        <section class="card" style="margin-top: 2rem;">
+            <h2>🔧 Technical Information</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>
+                    <h3>Supported Formats</h3>
+                    <ul class="features-list">
+                        <li>JPEG/JPG</li>
+                        <li>PNG</li>
+                        <li>GIF</li>
+                        <li>WEBP</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Limitations</h3>
+                    <ul class="features-list">
+                        <li>Max size: {% if config %}{{ config.MAX_SIZE_MB }}{% else %}5{% endif %}MB</li>
+                        <li>10 uploads/minute per user</li>
+                        <li>Images only (no videos)</li>
+                        <li>Must be sent as photo</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
         <!-- Footer -->
         <footer class="footer">
             <p>&copy; 2024 Telegram Image Uploader Bot. All rights reserved.</p>
             <p>Service powered by ImgBB API and Python Telegram Bot</p>
+            <p style="margin-top: 1rem; font-size: 0.9rem;">
+                Status: <span id="statusText">Checking...</span>
+            </p>
         </footer>
     </div>
 
     <script>
-        // Update uptime counter
-        function updateUptime() {
+        // Update stats dynamically
+        function updateStats() {
             fetch('/health')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(data => {
+                    // Update uptime
                     document.getElementById('uptime').textContent = 
                         Math.round(data.uptime);
+                    
+                    // Update upload count
+                    document.getElementById('uploadCount').textContent = 
+                        data.uploads_processed || 0;
+                    
+                    // Update status
+                    document.getElementById('statusText').textContent = 
+                        'Online - ' + Math.round(data.uptime) + ' seconds uptime';
+                    
+                    // Update service status
+                    const statusElement = document.getElementById('serviceStatus');
+                    if (data.status === 'ok') {
+                        statusElement.className = 'service-status status-online';
+                        statusElement.textContent = '● Service Online';
+                    } else {
+                        statusElement.className = 'service-status status-offline';
+                        statusElement.textContent = '● Service Offline';
+                    }
                 })
                 .catch(error => {
-                    console.log('Could not fetch uptime:', error);
+                    console.log('Could not fetch stats:', error);
+                    document.getElementById('statusText').textContent = 'Offline - Unable to connect';
+                    document.getElementById('serviceStatus').className = 'service-status status-offline';
+                    document.getElementById('serviceStatus').textContent = '● Service Offline';
                 });
         }
-
-        // Update uptime every 10 seconds
-        updateUptime();
-        setInterval(updateUptime, 10000);
 
         // Add some interactive effects
         document.addEventListener('DOMContentLoaded', function() {
@@ -399,6 +448,22 @@
                     card.style.transform = 'translateY(0)';
                 }, index * 200);
             });
+
+            // Initial stats update
+            updateStats();
+        });
+
+        // Update stats every 10 seconds
+        setInterval(updateStats, 10000);
+
+        // Add click effects to buttons
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('telegram-button')) {
+                e.target.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    e.target.style.transform = 'scale(1.05)';
+                }, 150);
+            }
         });
     </script>
 </body>
