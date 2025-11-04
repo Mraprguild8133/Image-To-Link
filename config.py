@@ -18,7 +18,7 @@ class Config:
 config = Config(
     BOT_TOKEN=os.getenv("BOT_TOKEN", ""),
     IMGBB_API_KEY=os.getenv("IMGBB_API_KEY", ""),
-    MAX_SIZE_MB=int(os.getenv("MAX_SIZE_MB", "10")),
+    MAX_SIZE_MB=int(os.getenv("MAX_SIZE_MB", "20")),
     FLASK_PORT=int(os.getenv("FLASK_PORT", "8000")),
     FLASK_HOST=os.getenv("FLASK_HOST", "0.0.0.0")
 )
