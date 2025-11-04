@@ -11,7 +11,20 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Import configuration
-from config import config
+try:
+    from config import config
+except ImportError:
+    # Fallback configuration
+    class Config:
+        BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_bot_token_here')
+        IMGBB_API_KEY = os.getenv('IMGBB_API_KEY', 'your_imgbb_api_key_here')
+        MAX_SIZE_MB = int(os.getenv('MAX_SIZE_MB', 5))
+        FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+        FLASK_PORT = int(os.getenv('FLASK_PORT', 8080))
+        MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
+        IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
+    
+    config = Config()
 
 # Set up logging
 logging.basicConfig(
@@ -43,8 +56,13 @@ class RateLimiter:
 # Initialize rate limiter
 rate_limiter = RateLimiter()
 
-# Flask App
-flask_app = Flask(__name__, template_folder="templates")
+# Flask App - Fix template folder path
+template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+if not os.path.exists(template_dir):
+    os.makedirs(template_dir)
+    logger.info(f"Created templates directory: {template_dir}")
+
+flask_app = Flask(__name__, template_folder=template_dir)
 
 # Add startup time for health checks
 STARTUP_TIME = time.time()
@@ -58,11 +76,30 @@ def before_request():
 @flask_app.route("/", methods=['GET', 'HEAD', 'OPTIONS'])
 def index():
     """Handle multiple request methods for the root route."""
-    if request.method == 'HEAD':
-        return '', 200
-    elif request.method == 'OPTIONS':
-        return '', 200
-    return render_template("index.html", config=config)
+    try:
+        if request.method == 'HEAD':
+            return '', 200
+        elif request.method == 'OPTIONS':
+            return '', 200
+        
+        # Pass config safely to template
+        template_config = {
+            'MAX_SIZE_MB': getattr(config, 'MAX_SIZE_MB', 5)
+        }
+        return render_template("index.html", config=template_config)
+    except Exception as e:
+        logger.error(f"Error rendering index: {e}")
+        # Fallback response if template fails
+        return jsonify({
+            "name": "Telegram Image Uploader Bot",
+            "status": "running",
+            "message": "Bot is running successfully",
+            "max_file_size_mb": getattr(config, 'MAX_SIZE_MB', 5),
+            "endpoints": {
+                "/health": "Health check",
+                "/info": "Service information"
+            }
+        })
 
 @flask_app.route("/health", methods=['GET', 'HEAD'])
 def health():
@@ -87,7 +124,7 @@ def info():
         "name": "Telegram Image Uploader Bot",
         "description": "Upload images to ImgBB via Telegram",
         "version": "1.0.0",
-        "max_file_size_mb": config.MAX_SIZE_MB,
+        "max_file_size_mb": getattr(config, 'MAX_SIZE_MB', 5),
         "rate_limit": "10 uploads per minute per user",
         "supported_formats": "JPEG, PNG, GIF, WEBP"
     })
@@ -116,12 +153,15 @@ def set_security_headers(response):
 def run_flask():
     """Run Flask app in a separate thread"""
     logger.info(f"Starting Flask server on {config.FLASK_HOST}:{config.FLASK_PORT}")
-    flask_app.run(
-        host=config.FLASK_HOST, 
-        port=config.FLASK_PORT, 
-        debug=False,
-        use_reloader=False
-    )
+    try:
+        flask_app.run(
+            host=config.FLASK_HOST, 
+            port=config.FLASK_PORT, 
+            debug=False,
+            use_reloader=False
+        )
+    except Exception as e:
+        logger.error(f"Flask server failed: {e}")
 
 # --- TELEGRAM BOT HANDLERS ---
 
@@ -135,7 +175,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "• Direct URLs for easy sharing\n"
         "• Delete links for image management\n"
         "• Quality preservation\n\n"
-        f"📁 *File Limit:* Max {config.MAX_SIZE_MB}MB per image\n"
+        f"📁 *File Limit:* Max {getattr(config, 'MAX_SIZE_MB', 5)}MB per image\n"
         "⚡ *Rate Limit:* 10 uploads per minute\n\n"
         "📸 *How to use:* Just send me an image as a photo!\n"
         "Use /help for detailed instructions."
@@ -155,7 +195,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "3. *Get Your Links:* Receive direct URL and delete link\n\n"
         "⚠️ *Important Notes:*\n"
         "• Send images as *Photos* (not documents)\n"
-        f"• Maximum file size: {config.MAX_SIZE_MB}MB\n"
+        f"• Maximum file size: {getattr(config, 'MAX_SIZE_MB', 5)}MB\n"
         "• Rate limit: 10 uploads per minute\n"
         "• Supported formats: JPEG, PNG, GIF, WEBP\n\n"
         "🔧 *Commands:*\n"
@@ -181,7 +221,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"• 🟢 Online\n"
         f"• ⏰ Uptime: {hours}h {minutes}m {seconds}s\n"
         f"• 📈 Uploads Processed: {UPLOAD_COUNTER}\n"
-        f"• 📁 Max File Size: {config.MAX_SIZE_MB}MB\n"
+        f"• 📁 Max File Size: {getattr(config, 'MAX_SIZE_MB', 5)}MB\n"
         f"• 🚦 Rate Limit: 10/min per user\n"
         f"• 🔄 Service: Operational\n\n"
         "_All systems normal_"
@@ -228,10 +268,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # 3. Check the file size limit
     file_size_mb = file.file_size / (1024 * 1024)
-    if file.file_size > config.MAX_SIZE_BYTES:
+    max_size_bytes = getattr(config, 'MAX_SIZE_BYTES', 5 * 1024 * 1024)
+    if file.file_size > max_size_bytes:
         await message.reply_text(
             f"🚫 *File Too Large*\n\n"
-            f"Your image is {file_size_mb:.2f}MB, but the maximum allowed is {config.MAX_SIZE_MB}MB.\n"
+            f"Your image is {file_size_mb:.2f}MB, but the maximum allowed is {getattr(config, 'MAX_SIZE_MB', 5)}MB.\n"
             f"Please send a smaller image.",
             parse_mode=constants.ParseMode.MARKDOWN
         )
@@ -270,22 +311,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # 5. Prepare and send the image to ImgBB
     payload = {
-        'key': config.IMGBB_API_KEY
+        'key': getattr(config, 'IMGBB_API_KEY', '')
     }
     
-    # Determine file extension based on MIME type or use jpg as default
-    file_extension = "jpg"
     files = {
-        'image': (f'image.{file_extension}', file_bytes, 'image/jpeg')
+        'image': ('image.jpg', file_bytes, 'image/jpeg')
     }
 
     try:
         # Perform the HTTP POST request to ImgBB
         imgbb_response = requests.post(
-            config.IMGBB_UPLOAD_URL, 
+            getattr(config, 'IMGBB_UPLOAD_URL', 'https://api.imgbb.com/1/upload'), 
             data=payload, 
             files=files,
-            timeout=30  # 30 second timeout
+            timeout=30
         )
         imgbb_response.raise_for_status()
         
@@ -377,7 +416,6 @@ async def handle_document_image(update: Update, context: ContextTypes.DEFAULT_TY
         )
         
         # Use the same processing logic as handle_photo
-        # You could refactor to share common code
         await handle_photo(update, context)
     else:
         await update.message.reply_text(
@@ -411,27 +449,19 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         except Exception as e:
             logger.error(f"Could not send error message to user: {e}")
 
-# --- CONFIGURATION VALIDATION ---
-
 def validate_config():
     """Validate that all required configuration variables are present."""
-    required_vars = ['BOT_TOKEN', 'IMGBB_API_KEY', 'MAX_SIZE_MB', 'FLASK_HOST', 'FLASK_PORT']
+    required_vars = ['BOT_TOKEN', 'IMGBB_API_KEY']
     
     for var in required_vars:
         if not hasattr(config, var):
             raise ValueError(f"Missing required configuration: {var}")
         
         value = getattr(config, var)
-        if not value:
-            raise ValueError(f"Empty value for required configuration: {var}")
-    
-    # Calculate MAX_SIZE_BYTES if not present
-    if not hasattr(config, 'MAX_SIZE_BYTES'):
-        config.MAX_SIZE_BYTES = config.MAX_SIZE_MB * 1024 * 1024
+        if not value or value == f'your_{var.lower()}_here':
+            raise ValueError(f"Please set the {var} in your configuration")
     
     logger.info("Configuration validation passed")
-
-# --- MAIN FUNCTION ---
 
 def main() -> None:
     """Start the bot and Flask server."""
@@ -464,7 +494,7 @@ def main() -> None:
 
     # Start the Bot
     logger.info("Starting Telegram bot polling...")
-    logger.info(f"Bot is ready! Maximum file size: {config.MAX_SIZE_MB}MB")
+    logger.info(f"Bot is ready! Maximum file size: {getattr(config, 'MAX_SIZE_MB', 5)}MB")
     
     try:
         application.run_polling(
